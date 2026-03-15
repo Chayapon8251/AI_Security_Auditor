@@ -34,7 +34,7 @@ export default function SecurityAuditorLive() {
   }, [logs]);
 
   useEffect(() => {
-    socketRef.current = io('http://localhost:3002', {
+    socketRef.current = io('http://34.142.131.101:3002', {
       transports: ['websocket'],
       upgrade: false
     });
