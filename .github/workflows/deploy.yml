@@ -10,14 +10,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Deploy via SSH
+      - name: Deploy to GCP VM via SSH
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.GCP_VM_IP }}
           username: ${{ secrets.GCP_VM_USERNAME }}
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           script: |
-            cd ~/AI_Security_Auditor
+            # 1. เปลี่ยนชื่อโฟลเดอร์ให้ตรงกับใน VM
+            cd /home/${{ secrets.GCP_VM_USERNAME }}/AI_Security_Auditor
+            
+            # 2. ดึงโค้ดล่าสุด
             git pull origin main
-            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
-            docker compose up --build -d
+            
+            # 3. สร้างไฟล์ .env ให้ Backend (แก้ชื่อโฟลเดอร์ backend ให้ตรง)
+            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > ./ai-auditor-backend/.env
+            
+            # 4. สั่งรัน Docker Compose
+            docker compose up -d --build
