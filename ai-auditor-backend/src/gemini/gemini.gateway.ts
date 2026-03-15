@@ -1,3 +1,5 @@
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -7,10 +9,8 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import WebSocket from 'ws';
-import * as dotenv from 'dotenv';
 
-dotenv.config();
-
+@Injectable()
 @WebSocketGateway({ cors: { origin: '*' }, transports: ['websocket'], upgrade: false }) // ยอมรับ Connection จาก Next.js
 export class GeminiGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -18,11 +18,37 @@ export class GeminiGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // เก็บ Session ของ Gemini แยกตาม Client ID
   private geminiSessions: Map<string, WebSocket> = new Map();
-  private readonly GEMINI_MODEL = 'models/gemini-2.0-flash-exp';
+  private readonly GEMINI_MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
+
+  constructor(private configService: ConfigService) {}
 
   handleConnection(client: Socket) {
     console.log(`🟢 Client connected: ${client.id}`);
+    //this.connectToGemini(client);
+  }
+
+  @SubscribeMessage('start-session')
+  handleStartSession(client: Socket) {
+    console.log(`🚀 Client ${client.id} requested to start Gemini session!`);
+    
+    // เคลียร์ Session เก่า (ถ้ามี)
+    const existingWs = this.geminiSessions.get(client.id);
+    if (existingWs && existingWs.readyState === WebSocket.OPEN) {
+      console.log(`🧹 Cleaning up ghost connection for client ${client.id}`);
+      existingWs.close();
+    }
+
     this.connectToGemini(client);
+  }
+
+  @SubscribeMessage('stop-session')
+  handleStopSession(client: Socket) {
+    console.log(`🛑 Client ${client.id} stopped the session.`);
+    const ws = this.geminiSessions.get(client.id);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+    this.geminiSessions.delete(client.id);
   }
 
   handleDisconnect(client: Socket) {
@@ -35,32 +61,23 @@ export class GeminiGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private connectToGemini(client: Socket) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
     if (!apiKey) {
-      console.error('Missing GEMINI_API_KEY');
+      console.error('❌ Missing GEMINI_API_KEY in ConfigService');
       return;
     }
-
-    // URL สำหรับเชื่อมต่อ Gemini Live API แบบ Bidi (Bidirectional)
-    const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+    console.log('✅ API Key found, connecting to Gemini...');
+    const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
     const geminiWs = new WebSocket(url);
 
     geminiWs.on('open', () => {
       console.log(`🚀 Connected to Gemini API for client: ${client.id}`);
-
-      // 1. ส่ง Setup Message ทันทีที่เชื่อมต่อ เพื่อกำหนด Persona (สำคัญมากสำหรับ Hackathon!)
+      // 1. ส่ง Setup Message ทันทีที่เชื่อมต่อ
       const setupMessage = {
         setup: {
           model: this.GEMINI_MODEL,
           generationConfig: {
             responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: "Aoide", // ลองเลือกชื่อ Aoide, Charon, หรือ Puck ดูครับ
-                }
-              }
-            } // บังคับให้ AI ตอบกลับมาเป็นเสียง
           },
           systemInstruction: {
             parts: [{
@@ -70,41 +87,48 @@ export class GeminiGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       };
       geminiWs.send(JSON.stringify(setupMessage));
-
-      // 2. ส่งคำสั่งลับให้ AI พูดเปิดตัว (ทำหลังจากส่ง Setup 1 วินาที)
-      setTimeout(() => {
-        const greeting = {
-          realtimeInput: {
-            mediaChunks: [{
-              mimeType: "text/plain",
-              data: Buffer.from("User is ready. Please greet them as a professional Security Auditor and mention that you are monitoring their screen in real-time.").toString('base64')
-            }]
-          }
-        };
-        geminiWs.send(JSON.stringify(greeting));
-      }, 1000);
     });
 
     geminiWs.on('message', (data: WebSocket.Data) => {
       try {
         const response = JSON.parse(data.toString());
+        // ปิด Log ยาวๆ ไปก่อน จะได้ไม่งง
+        console.log('📨 Gemini raw response:', JSON.stringify(response).slice(0, 200));
 
-        // 1. เช็คว่าการ Setup สำเร็จหรือไม่ (เอาไว้ดูใน Log เพื่อความมั่นใจ)
+        // 2. รอ setupComplete แล้วค่อยส่ง greeting ผ่าน clientContent (วิธีที่ถูกต้อง)
         if (response.setupComplete) {
-          console.log(`✅ Setup complete for client: ${client.id}`);
+          console.log(`✅ Setup complete for client: ${client.id}. Sending greeting...`);
+          const greeting = {
+            clientContent: {
+              turns: [{
+                role: "user",
+                parts: [{
+                  text: "Please greet the user as a professional Security Auditor and mention that you are monitoring their screen in real-time."
+                }]
+              }],
+              turnComplete: true
+            }
+          };
+          geminiWs.send(JSON.stringify(greeting));
         }
 
-        // 2. ส่งข้อมูล modelTurn ไปที่ Frontend (ซึ่งมีก้อน Audio PCM อยู่ข้างใน)
+        // 3. ส่ง Audio กลับไปให้ Client
         if (response.serverContent?.modelTurn) {
+          console.log('🔊 Audio data received from Gemini, emitting to client...');
           client.emit('gemini-response', response.serverContent.modelTurn);
         }
       } catch (error) {
-        console.error('Error parsing Gemini response:', error);
+        console.error('❌ Error parsing Gemini response:', error);
       }
     });
 
+    // ✅ เพิ่มการดักจับ Error และ Close ฝั่ง Gemini จะได้รู้ถ้า Google ตัดสาย
+    geminiWs.on('close', (code, reason) => {
+      console.log(`⚠️ Gemini connection closed for client ${client.id} | Code: ${code}, Reason: ${reason}`);
+    });
+
     geminiWs.on('error', (error) => {
-      console.error(`Gemini WS Error for ${client.id}:`, error);
+      console.error(`❌ Gemini WebSocket Error for client ${client.id}:`, error);
     });
 
     this.geminiSessions.set(client.id, geminiWs);
@@ -113,10 +137,33 @@ export class GeminiGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // รับ Event 'media-stream' จาก Next.js (ภาพและเสียง) แล้วยิงตรงเข้า Gemini
   @SubscribeMessage('media-stream')
   handleMediaStream(client: Socket, payload: any) {
+    // 💡 Log เพื่อเช็คว่า Next.js ส่งอะไรมาให้เราตอนเราพูด
+    console.log('🎤 Received audio chunk from Next.js:', payload?.realtimeInput?.mediaChunks?.[0]?.mimeType);
     const ws = this.geminiSessions.get(client.id);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      // payload ถูกจัด format มาจากหน้าเว็บเรียบร้อยแล้ว { realtimeInput: { mediaChunks: [...] } }
       ws.send(JSON.stringify(payload));
+    }
+  }
+
+  // 🧪 Test function: ส่ง text ไปให้ Gemini โดยตรง เพื่อเช็คว่า Gemini ตอบกลับได้ไหม
+  @SubscribeMessage('test-message')
+  handleTestMessage(client: Socket, text: string) {
+    console.log(`🧪 Test message from client ${client.id}:`, text);
+    const ws = this.geminiSessions.get(client.id);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const testPayload = {
+        clientContent: {
+          turns: [{
+            role: "user",
+            parts: [{ text: text || "Hello, can you hear me?" }]
+          }],
+          turnComplete: true
+        }
+      };
+      ws.send(JSON.stringify(testPayload));
+      console.log('🧪 Test payload sent to Gemini');
+    } else {
+      console.log('❌ No active Gemini session for this client');
     }
   }
 }
