@@ -201,7 +201,7 @@ export default function SecurityAuditorLive() {
         playbackContextRef.current.resume();
       }
 
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' } as any, audio: false });
       const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       const combinedStream = new MediaStream([...screenStream.getTracks(), ...micStream.getTracks()]);
