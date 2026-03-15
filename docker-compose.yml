@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./ai-auditor-backend
+    container_name: soc-backend
+    ports:
+      - "3002:3002"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY} # ดึงจาก .env บน Server
+    restart: always
+
+  frontend:
+    build: ./ai-auditor-frontend
+    container_name: soc-frontend
+    ports:
+      - "80:3000" # Map พอร์ต 80 เพื่อให้เข้าเว็บได้โดยไม่ต้องพิมพ์พอร์ต
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://<YOUR_GCP_VM_IP>:3002
+    restart: always
