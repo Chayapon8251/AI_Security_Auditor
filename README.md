@@ -35,3 +35,21 @@ We have fully containerized this project to make it incredibly easy for judges t
    ```bash
     docker compose up -d --build
    ```
+## ⚠️ Important: Browser Configuration (Required)
+Since this project requires **Screen & Audio Capture** via WebRTC, modern browsers require a **Secure Context (HTTPS)**. If you are running this on `http://localhost` or a remote IP via HTTP, you must manually enable this flag to allow the browser to access your screen/mic:
+
+### For Google Chrome:
+1. Copy and paste this into your address bar: 
+   `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
+2. Set the policy to **Enabled**.
+3. In the text box, add your site URL (e.g., `http://34.142.131.101` or `http://localhost:3000`).
+4. Click **Relaunch** at the bottom.
+
+### For Microsoft Edge:
+1. Copy and paste this into your address bar: 
+   `edge://flags/#unsafely-treat-insecure-origin-as-secure`
+2. Set the policy to **Enabled**.
+3. Add your site URL in the text box.
+4. Click **Restart**.
+
+> **Note:** Without this step, the "Start Capture" button will not work due to browser security policies.
