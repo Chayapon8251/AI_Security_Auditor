@@ -3,7 +3,6 @@
 Nexus SOC Auditor is a next-generation Live Agent built for the #GeminiLiveAgentChallenge. It acts as a real-time cybersecurity assistant that "sees" your screen and "hears" your voice to identify code vulnerabilities, misconfigurations, and hardcoded secrets on the fly.
 
 ## Demo clip
-https://youtu.be/-j0HGmlforc
 
 ## The "Wow" Factor
 This project goes beyond text-in/text-out. It leverages the **Gemini Live API** to establish a bidirectional WebSocket connection. The agent processes interleaved multimodal inputs (real-time screen capture + microphone audio) and delivers professional audio responses directly to the developer, acting as an elite, on-demand SOC Analyst.
